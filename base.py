@@ -431,9 +431,9 @@ _adoption_pct = f"{_charged / _total * 100:.1f}%" if _total > 0 else "—"
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("🔌 Total Connections", f"{_total:,}")
-c2.metric("⚡ Charged", f"{_charged:,}", delta=f"+{_charged:,}" if _charged > 0 else None)
+c2.metric("⚡ Charged", f"{_charged:,}")
 c3.metric("📈 Adoption Rate", _adoption_pct)
-c4.metric("🎯 Uncovered", f"{_uncovered:,}", delta=f"-{_uncovered:,}" if _uncovered > 0 else None, delta_color="inverse")
+c4.metric("🎯 Uncovered", f"{_uncovered:,}")
 c5.metric("📍 Unassigned", f"{_unassigned:,}")
 
 with st.expander("📊 KPIs by MRU & Area — click to expand", expanded=False):
