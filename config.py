@@ -19,7 +19,7 @@ from premium_theme import CHARGED_COLOR_PREMIUM
 # ── GitHub Database Settings ─────────────────────────────────────────────────────
 GITHUB_OWNER = "darksoul0379"
 GITHUB_REPO  = "BPCL_PNG_Model_Sitapur"
-BRANCH       = "database"
+BRANCH       = "main"
 try:
     GITHUB_TOKEN: str = st.secrets.get("GITHUB_TOKEN", "")
 except Exception:
