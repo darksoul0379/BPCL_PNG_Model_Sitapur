@@ -27,6 +27,7 @@ render_bot_tab(df_conn, df_master)
 Internal helpers are prefixed with _ and are not intended for external use.
 """
 
+import re
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -717,52 +718,105 @@ def _render_ranking(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
 
 def _render_search(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
     """Search Mode: real-time full-text search across all connection records."""
-    _bot_bubble("🔍 <b>Search Mode</b> — enter a name, meter number, or mobile to search all connections.")
+    _bot_bubble("🔍 <b>Search Mode</b> — search by name/mobile or paste one or many meter numbers.")
 
-    query = st.text_input(
-        "🔎 Search query", "",
-        placeholder="e.g. Ramesh / RR2401 / 9876543210",
-        key="bot_search_query",
+    search_mode = st.radio(
+        "Search type",
+        ["Single Search", "Multiple Meter IDs"],
+        horizontal=True,
+        key="bot_search_mode",
     )
-    if query:
-        # Build set of charged meter numbers for the "Charged?" indicator column
-        charged_meters = (
-            set(df_master["Meter Number"].str.strip().str.lower())
-            if not df_master.empty and "Meter Number" in df_master.columns
-            else set()
+
+    if search_mode == "Multiple Meter IDs":
+        raw_meter_text = st.text_area(
+            "📋 Paste meter IDs",
+            "",
+            placeholder="Paste a copied Excel column or a space/comma/newline-separated list of meter IDs",
+            key="bot_multi_meter_query",
+            height=140,
         )
-        mask = (
-            df_conn["NAME"].str.contains(query, case=False, na=False) |
-            df_conn["METER NO"].str.contains(query, case=False, na=False) |
-            df_conn["MOB NO"].str.contains(query, case=False, na=False)
-        )
-        results = df_conn[mask].copy()
-        results["Charged?"] = results["METER NO"].apply(
-            lambda m: "✅ Yes" if str(m).strip().lower() in charged_meters else "❌ No"
-        )
-        _bot_bubble(f"Found <b>{len(results):,}</b> result(s) for <i>\"{query}\"</i>.")
-        if not results.empty:
-            show_cols = [c for c in [
-                "METER NO", "NAME", "MOB NO", "MRU", "Main_Area",
-                "Subarea", "METER INLET GI", "METER OUTLET GI", "TOTAL GI", "Charged?",
-            ] if c in results.columns]
-            st.dataframe(
-                results[show_cols].rename(columns={
-                    "METER NO": "Meter No", "NAME": "Name", "MOB NO": "Mobile",
-                    "Main_Area": "Area", "METER INLET GI": "Inlet GI",
-                    "METER OUTLET GI": "Outlet GI", "TOTAL GI": "Total GI",
-                }),
-                use_container_width=True, hide_index=True,
+
+        if raw_meter_text.strip():
+            charged_meters = (
+                set(df_master["Meter Number"].astype(str).str.strip().str.lower())
+                if not df_master.empty and "Meter Number" in df_master.columns
+                else set()
             )
+            meter_tokens = [t.strip() for t in re.split(r"[\s,;]+", raw_meter_text) if t.strip()]
+            meter_keys = {t.lower() for t in meter_tokens}
+
+            results = df_conn[df_conn["METER NO"].astype(str).str.strip().str.lower().isin(meter_keys)].copy()
+            results["Charged?"] = results["METER NO"].apply(
+                lambda m: "✅ Yes" if str(m).strip().lower() in charged_meters else "❌ No"
+            )
+            _bot_bubble(
+                f"Found <b>{len(results):,}</b> match(es) from <b>{len(meter_tokens):,}</b> pasted meter ID(s)."
+            )
+            if not results.empty:
+                show_cols = [c for c in [
+                    "METER NO", "NAME", "MOB NO", "MRU", "Main_Area",
+                    "Subarea", "METER INLET GI", "METER OUTLET GI", "TOTAL GI", "Charged?",
+                ] if c in results.columns]
+                st.dataframe(
+                    results[show_cols].rename(columns={
+                        "METER NO": "Meter No", "NAME": "Name", "MOB NO": "Mobile",
+                        "Main_Area": "Area", "METER INLET GI": "Inlet GI",
+                        "METER OUTLET GI": "Outlet GI", "TOTAL GI": "Total GI",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                _bot_bubble("😕 No meter IDs matched. Paste the copied Excel column directly or use spaces/new lines between meter IDs.")
         else:
-            _bot_bubble("😕 No matches found. Try a different name, meter number, or mobile.")
+            st.markdown(
+                '<p class="menu-hint">👆 Paste a full Excel meter column here — spaces, new lines, and commas are all accepted.</p>',
+                unsafe_allow_html=True,
+            )
     else:
-        st.markdown(
-            '<p class="menu-hint">👆 Type above to search across all records in real-time.</p>',
-            unsafe_allow_html=True,
+        query = st.text_input(
+            "🔎 Search query", "",
+            placeholder="e.g. Ramesh / RR2401 / 9876543210",
+            key="bot_search_query",
         )
+        if query:
+            charged_meters = (
+                set(df_master["Meter Number"].str.strip().str.lower())
+                if not df_master.empty and "Meter Number" in df_master.columns
+                else set()
+            )
+            mask = (
+                df_conn["NAME"].str.contains(query, case=False, na=False) |
+                df_conn["METER NO"].str.contains(query, case=False, na=False) |
+                df_conn["MOB NO"].str.contains(query, case=False, na=False)
+            )
+            results = df_conn[mask].copy()
+            results["Charged?"] = results["METER NO"].apply(
+                lambda m: "✅ Yes" if str(m).strip().lower() in charged_meters else "❌ No"
+            )
+            _bot_bubble(f"Found <b>{len(results):,}</b> result(s) for <i>\"{query}\"</i>.")
+            if not results.empty:
+                show_cols = [c for c in [
+                    "METER NO", "NAME", "MOB NO", "MRU", "Main_Area",
+                    "Subarea", "METER INLET GI", "METER OUTLET GI", "TOTAL GI", "Charged?",
+                ] if c in results.columns]
+                st.dataframe(
+                    results[show_cols].rename(columns={
+                        "METER NO": "Meter No", "NAME": "Name", "MOB NO": "Mobile",
+                        "Main_Area": "Area", "METER INLET GI": "Inlet GI",
+                        "METER OUTLET GI": "Outlet GI", "TOTAL GI": "Total GI",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                _bot_bubble("😕 No matches found. Try a different name, meter number, or mobile.")
+        else:
+            st.markdown(
+                '<p class="menu-hint">👆 Type above to search across all records in real-time.</p>',
+                unsafe_allow_html=True,
+            )
 
     if st.button("🏠 Back to Menu", key="bot_back_search"):
         st.session_state.bot_mode = "menu"
+
         st.session_state.bot_chat = []
         st.rerun()
