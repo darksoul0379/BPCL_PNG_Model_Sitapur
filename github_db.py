@@ -206,10 +206,46 @@ def read_csv_github(path: str, expected_cols: list) -> tuple:
     except Exception as ex:
         return pd.DataFrame(columns=expected_cols), sha, f"CSV parse failed: {ex}"
 
-    # Strip whitespace from all column headers
-    df.columns = [str(col).strip() for col in df.columns]
+    # Strip BOM and whitespace from all column headers
+    df.columns = [str(col).strip().replace("\ufeff", "") for col in df.columns]
 
-    # Alias map — canonical name → list of alternate names the CSV might use
+    # ── Special handling for Conversion-Data.csv ─────────────────────────────
+    # The file may have been corrupted into 8 columns by a previous bad write:
+    #   Meter Number | Customer Name | Mobile NUMBER | Conversion Date |
+    #   Latitude | Longitude | Meter No. | Date
+    # We detect this and consolidate back to 2 clean columns: Meter No. + Date
+    if expected_cols == ["Meter No.", "Date"]:
+        # Resolve meter number from whichever column has it
+        meter_col = next(
+            (c for c in ["Meter No.", "Meter Number"] if c in df.columns), None
+        )
+        # Resolve date from whichever column has it
+        date_col = next(
+            (c for c in ["Date", "Conversion Date"] if c in df.columns), None
+        )
+        rows = []
+        for _, row in df.iterrows():
+            m = str(row[meter_col]).strip() if meter_col else ""
+            d = str(row[date_col]).strip()  if date_col  else ""
+            # Also check the other meter/date columns for this row if primary is empty
+            if not m or m in ("", "nan"):
+                for alt in ["Meter Number", "Meter No."]:
+                    if alt in df.columns and str(row[alt]).strip() not in ("", "nan"):
+                        m = str(row[alt]).strip()
+                        break
+            if not d or d in ("", "nan"):
+                for alt in ["Conversion Date", "Date"]:
+                    if alt in df.columns and str(row[alt]).strip() not in ("", "nan"):
+                        d = str(row[alt]).strip()
+                        break
+            if m and m != "nan":
+                rows.append({"Meter No.": m, "Date": d})
+        clean_df = pd.DataFrame(rows, columns=["Meter No.", "Date"])
+        clean_df["Meter No."] = clean_df["Meter No."].fillna("").astype(str)
+        clean_df["Date"]      = clean_df["Date"].fillna("").astype(str)
+        return clean_df, sha, None
+
+    # ── Alias map for Connection-Data.csv columns ─────────────────────────────
     _ALIASES: dict[str, list[str]] = {
         "METER NO":        ["meter_no"],
         "NAME":            ["customer_name"],
@@ -219,10 +255,6 @@ def read_csv_github(path: str, expected_cols: list) -> tuple:
         "METER INLET GI":  ["meter_inlet_gi"],
         "METER OUTLET GI": ["meter_outlet_gi"],
         "TOTAL GI":        ["total_gi"],
-        "Meter Number":    ["meter_no", "meter_number"],
-        "Customer Name":   ["customer_name"],
-        "Mobile NUMBER":   ["mobile_no", "mobile_number"],
-        "Conversion Date": ["conversion_date"],
     }
     for target_col, aliases in _ALIASES.items():
         if target_col not in df.columns:
@@ -241,10 +273,9 @@ def read_csv_github(path: str, expected_cols: list) -> tuple:
         if df[col].dtype == object:
             df[col] = df[col].fillna("")
 
-    # Reorder: expected columns first, extras at the end
+    # Return ONLY expected columns — never write extra columns back to GitHub
     ordered = [c for c in expected_cols if c in df.columns]
-    extras  = [c for c in df.columns if c not in expected_cols]
-    return df[ordered + extras], sha, None
+    return df[ordered], sha, None
 
 
 # ── CSV serialisation helper ─────────────────────────────────────────────────────
