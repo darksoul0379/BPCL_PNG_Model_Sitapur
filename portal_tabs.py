@@ -26,7 +26,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from config import CONNECTION_FILE, MASTER_FILE, CONNECTION_FILE_COLUMNS, MASTER_FILE_COLUMNS
+from config import (
+    CONNECTION_FILE, MASTER_FILE,
+    CONNECTION_FILE_COLUMNS, MASTER_FILE_COLUMNS,
+    ROOT_AREAS_FILE, ROOT_MRUS_FILE,
+)
 from github_db import (
     read_csv_github,
     github_put_file,
@@ -34,6 +38,30 @@ from github_db import (
     normalize_meter,
     lookup_connection_row,
 )
+
+
+def _load_mru_area_data():
+    """Load MRUs and AREAs from local CSVs, return (mru_options, area_by_mru) cached in session."""
+    if "portal_mru_area" not in st.session_state:
+        try:
+            mrus = pd.read_csv(ROOT_MRUS_FILE)
+            mrus.columns = [c.strip().replace("\ufeff", "") for c in mrus.columns]
+            mrus["MRU_ID"]   = mrus["MRU"].astype(str).str.strip()
+            mrus["MRU_NAME"] = mrus["MRU NAME"].astype(str).str.strip()
+            # e.g. "MRU-1 : Naipalapur"
+            mrus["label"]    = "MRU-" + mrus["MRU_ID"] + " : " + mrus["MRU_NAME"]
+            mru_options = mrus[["MRU_ID", "label"]].values.tolist()  # [[id, label], ...]
+
+            areas = pd.read_csv(ROOT_AREAS_FILE)
+            areas.columns = [c.strip().replace("\ufeff", "") for c in areas.columns]
+            areas["MRU_ID"]    = areas["MRU"].astype(str).str.strip()
+            areas["AREA_NAME"] = areas["AREA"].astype(str).str.strip()
+            area_by_mru = areas.groupby("MRU_ID")["AREA_NAME"].apply(sorted).to_dict()
+
+            st.session_state["portal_mru_area"] = (mru_options, area_by_mru)
+        except Exception as e:
+            st.session_state["portal_mru_area"] = ([], {})
+    return st.session_state["portal_mru_area"]
 
 
 def render_new_connection_tab() -> None:
@@ -54,6 +82,39 @@ def render_new_connection_tab() -> None:
 
     st.markdown("### Add New Connection")
 
+    # ── MRU + Area cascading dropdowns (outside form so they react instantly) ─
+    mru_options, area_by_mru = _load_mru_area_data()
+
+    mru_labels  = [label for _, label in mru_options]
+    mru_ids     = [mid   for mid, _  in mru_options]
+
+    sel_mru_label = st.selectbox(
+        "MRU *",
+        options=["— Select MRU —"] + mru_labels,
+        key="nc_sel_mru",
+    )
+
+    sel_mru_id = None
+    if sel_mru_label != "— Select MRU —":
+        sel_mru_id = mru_ids[mru_labels.index(sel_mru_label)]
+
+    if sel_mru_id:
+        area_options = area_by_mru.get(sel_mru_id, [])
+        sel_area = st.selectbox(
+            "Area *",
+            options=area_options,
+            key="nc_sel_area",
+        )
+    else:
+        st.selectbox(
+            "Area *",
+            options=["— Select MRU first —"],
+            disabled=True,
+            key="nc_sel_area_disabled",
+        )
+        sel_area = ""
+
+    # ── Rest of the form ──────────────────────────────────────────────────────
     with st.form("new_connection_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         meter_no  = c1.text_input("Meter No *",      placeholder="e.g. RR2401")
@@ -76,12 +137,18 @@ def render_new_connection_tab() -> None:
     if not submitted:
         return
 
-    # ── Validate required fields ──────────────────────────────────────────────────
+    # ── Validate required fields ──────────────────────────────────────────────
     if not meter_no or not cust_name or not phone_no:
         st.error("Meter No, Customer Name, and Mobile No are required.")
         return
+    if not sel_mru_id:
+        st.error("Please select an MRU.")
+        return
+    if not sel_area:
+        st.error("Please select an Area.")
+        return
 
-    # ── Duplicate check ───────────────────────────────────────────────────────────
+    # ── Duplicate check ───────────────────────────────────────────────────────
     existing = (
         normalize_meter(conn_df["METER NO"])
         if not conn_df.empty
@@ -91,7 +158,7 @@ def render_new_connection_tab() -> None:
         st.warning(f"Meter `{meter_no}` already exists in connections.csv.")
         return
 
-    # ── Build new row and commit ──────────────────────────────────────────────────
+    # ── Build new row and commit ──────────────────────────────────────────────
     new_row = {
         "METER NO":        meter_no.strip(),
         "NAME":            cust_name.strip(),
@@ -101,6 +168,7 @@ def render_new_connection_tab() -> None:
         "METER INLET GI":  inlet_gi.strip(),
         "METER OUTLET GI": outlet_gi.strip(),
         "TOTAL GI":        total_gi.strip(),
+        "Area":            sel_area,
     }
     updated_df = pd.concat(
         [conn_df, pd.DataFrame([new_row])], ignore_index=True
@@ -109,10 +177,10 @@ def render_new_connection_tab() -> None:
         CONNECTION_FILE,
         write_csv_bytes(updated_df),
         conn_sha,
-        f"[portal] add connection {meter_no} · {datetime.now():%Y-%m-%d %H:%M}",
+        f"[portal] add connection {meter_no} ({sel_area}) · {datetime.now():%Y-%m-%d %H:%M}",
     )
     if ok:
-        st.success(f"Meter **{meter_no}** added successfully and committed to GitHub.")
+        st.success(f"Meter **{meter_no}** added to **{sel_area}** (MRU-{sel_mru_id}) and committed to GitHub.")
         st.balloons()
     else:
         st.error(f"GitHub write error: {resp.get('message', 'Unknown error')}")
@@ -219,7 +287,7 @@ def render_converted_tab() -> None:
         st.error("Meter No is required.")
         return
 
-    # ── Duplicate check in conversions ───────────────────────────────────────────
+    # ── Duplicate check in conversions (column is "Meter No." in real CSV) ───────
     existing = (
         normalize_meter(master_df["Meter No."])
         if not master_df.empty
