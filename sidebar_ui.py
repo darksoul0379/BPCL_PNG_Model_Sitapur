@@ -89,7 +89,9 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
     )
 
     # ── Charged date range filter (Overview) ──────────────────────────────────
-    charged_date_d0 = charged_date_d1 = None
+    # Always initialise so the return dict always contains these keys
+    charged_date_d0: None = None
+    charged_date_d1: None = None
     if not df_master.empty and "Conversion Date" in df_master.columns:
         _cm = df_master.copy()
         _cm["Conversion Date"] = pd.to_datetime(_cm["Conversion Date"], errors="coerce")
