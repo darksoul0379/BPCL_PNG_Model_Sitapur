@@ -79,7 +79,11 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
         st.session_state["sb_sel_areas_new"] = area_options
         valid_selected_areas = area_options
     else:
-        valid_selected_areas = [a for a in (prev_selected_areas or []) if a in area_options]
+        # Default to all areas on first load (prev is None) or keep valid previous selection
+        if prev_selected_areas is None:
+            valid_selected_areas = area_options
+        else:
+            valid_selected_areas = [a for a in prev_selected_areas if a in area_options]
 
     selected_areas = st.sidebar.multiselect(
         "Select Area(s)",
@@ -87,34 +91,6 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
         default=valid_selected_areas,
         key="sb_sel_areas_new",
     )
-
-    # ── Charged date range filter (Overview) ──────────────────────────────────
-    # Always initialise so the return dict always contains these keys
-    charged_date_d0: None = None
-    charged_date_d1: None = None
-    if not df_master.empty and "Conversion Date" in df_master.columns:
-        _cm = df_master.copy()
-        _cm["Conversion Date"] = pd.to_datetime(_cm["Conversion Date"], errors="coerce")
-        _cmin = _cm["Conversion Date"].min()
-        _cmax = _cm["Conversion Date"].max()
-        if pd.notna(_cmin) and pd.notna(_cmax):
-            _cmin_date = _cmin.date()
-            _cmax_date = _cmax.date()
-            _stored_c = st.session_state.get("sb_charged_date_range")
-            if isinstance(_stored_c, (list, tuple)) and len(_stored_c) == 2:
-                if _stored_c[0] < _cmin_date or _stored_c[1] > _cmax_date or _stored_c[0] > _stored_c[1]:
-                    st.session_state.pop("sb_charged_date_range", None)
-            st.sidebar.markdown(_section_label("⚡ Charged Date Range"), unsafe_allow_html=True)
-            _cdr = st.sidebar.date_input(
-                "Charged Conversion Range",
-                value=(_cmin_date, _cmax_date),
-                min_value=_cmin_date,
-                max_value=_cmax_date,
-                key="sb_charged_date_range",
-                label_visibility="collapsed",
-            )
-            if isinstance(_cdr, (list, tuple)) and len(_cdr) == 2:
-                charged_date_d0, charged_date_d1 = _cdr[0], _cdr[1]
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(_section_label("🎨 Dot Logic", color="#44445a"), unsafe_allow_html=True)
@@ -209,8 +185,6 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
         "map_style": map_style,
         "date_d0": date_d0,
         "date_d1": date_d1,
-        "charged_date_d0": charged_date_d0,
-        "charged_date_d1": charged_date_d1,
         "df_master_f": df_master_f,
         "map_mode": map_mode,
         "heatmap_tile": heatmap_tile,
