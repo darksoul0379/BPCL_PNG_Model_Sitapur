@@ -342,47 +342,19 @@ def _render_menu() -> None:
 
 
 def _render_summary(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
-    """Summary Mode: MRU + area slicers → KPI cards + tables + charts."""
+    """Summary Mode: MRU + area + subarea slicers → KPI cards + tables + charts."""
     _bot_bubble("📊 <b>Summary Mode</b> — use the filters below to narrow your scope.")
     _section_header("📍 Scope")
 
+    sf1, sf2, sf3 = st.columns(3)
     all_mrus, mru_to_areas, area_to_subareas, subarea_to_mru = _derive_geo_lists(df_conn)
-
-    # Build MRU labels like "MRU-1 : Naipalapur" from connection data
-    # MRU values in df_conn are already like "MRU-1"
-    mru_label_map = {}
-    for mru in all_mrus:
-        names = df_conn.loc[df_conn["MRU"] == mru, "MRU_NAME"].dropna().astype(str)
-        name  = names.iloc[0].strip() if not names.empty else ""
-        mru_label_map[mru] = f"{mru} : {name}" if name else mru
-    mru_labels   = [mru_label_map[m] for m in all_mrus]
-    label_to_mru = {v: k for k, v in mru_label_map.items()}
-
-    sf1, sf2 = st.columns(2)
-    sel_mru_labels = sf1.multiselect(
-        "MRU", options=mru_labels, default=[], key="sum_mru",
-        placeholder="Select MRU(s)…"
-    )
-    sum_mrus = [label_to_mru[l] for l in sel_mru_labels] if sel_mru_labels else all_mrus
-
+    sum_mrus  = sf1.multiselect("MRU", options=all_mrus, default=all_mrus, key="sum_mru") or all_mrus
     avail_a   = sorted({area for mru in sum_mrus for area in mru_to_areas.get(mru, [])})
-    sel_areas = sf2.multiselect(
-        "Area", options=avail_a, default=[], key="sum_area",
-        placeholder="Select Area(s)…"
-    )
-    sum_areas = sel_areas if sel_areas else avail_a
+    sum_areas = sf2.multiselect("Main Area", options=avail_a,                            default=avail_a,         key="sum_area") or avail_a
+    avail_s   = sorted({sub for area in sum_areas for sub in area_to_subareas.get(area, [])})
+    sum_subs  = sf3.multiselect("Subarea",   options=avail_s,                            default=avail_s,         key="sum_sub")  or avail_s
 
-    # Filter by MRU and Area (no subarea level)
-    sum_fc = df_conn[
-        (df_conn["MRU"] != "Unassigned") &
-        (df_conn["MRU"].isin(sum_mrus)) &
-        (df_conn["Main_Area"].isin(sum_areas))
-    ].copy()
-    sum_fv = df_master[
-        (df_master["MRU"] != "Unassigned") &
-        (df_master["MRU"].isin(sum_mrus)) &
-        (df_master["Main_Area"].isin(sum_areas))
-    ].copy() if not df_master.empty else pd.DataFrame()
+    sum_fc, sum_fv = _bot_apply_filters(df_conn, df_master, sum_mrus, sum_subs)
 
     st.markdown("<br>", unsafe_allow_html=True)
     _bot_kpi_row(sum_fc, sum_fv)
@@ -422,15 +394,15 @@ def _render_summary(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
     )
     st.plotly_chart(_dark_layout(fig_mru), use_container_width=True)
 
-    # Per-MRU area breakdown
+    # Per-MRU subarea breakdown
     for mru in sorted(sum_mrus):
         fc_m = sum_fc[sum_fc["MRU"] == mru]
         fv_m = sum_fv[sum_fv["MRU"] == mru] if not sum_fv.empty else pd.DataFrame()
         if fc_m.empty:
             continue
-        _section_header(f"🏙️ {mru} — Area Breakdown")
-        sub_s = _bot_summary_table(fc_m, fv_m, grp="Main_Area")
-        tot2: dict = {"Main_Area": f"{mru} TOTAL"}
+        _section_header(f"🏙️ {mru} — Subarea Breakdown")
+        sub_s = _bot_summary_table(fc_m, fv_m, grp="Subarea")
+        tot2: dict = {"Subarea": f"{mru} TOTAL"}
         for col in ["Total_Connections", "Charged", "Total_GI", "Inlet_GI", "Outlet_GI"]:
             if col in sub_s.columns:
                 tot2[col] = sub_s[col].sum()
@@ -449,7 +421,7 @@ def _render_summary(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
         sc1, sc2 = st.columns(2)
         with sc1:
             fig_pie = px.pie(
-                sub_s, names="Main_Area", values="Total_Connections",
+                sub_s, names="Subarea", values="Total_Connections",
                 title=f"{mru} — Share of Connections", hole=0.4,
             )
             fig_pie.update_traces(textposition="inside", textinfo="label+percent")
@@ -459,7 +431,7 @@ def _render_summary(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
         with sc2:
             fig_cr = px.bar(
                 sub_s.sort_values("Conv_%", ascending=False),
-                x="Main_Area", y="Conv_%", title=f"{mru} — Conversion Rate %",
+                x="Subarea", y="Conv_%", title=f"{mru} — Conversion Rate %",
                 color="Conv_%", color_continuous_scale="RdYlGn",
             )
             fig_cr.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
@@ -477,15 +449,27 @@ def _render_charged(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
     _bot_bubble("📋 <b>Data Mode</b> — filter by territory and date to explore charged connections.")
     _section_header("📍 Scope")
 
-    cf1, cf2, cf3 = st.columns(3)
     all_mrus, mru_to_areas, area_to_subareas, subarea_to_mru = _derive_geo_lists(df_conn)
-    ch_mrus   = cf1.multiselect("MRU", options=all_mrus, default=all_mrus, key="ch_mru") or all_mrus
-    avail_a   = sorted({area for mru in ch_mrus for area in mru_to_areas.get(mru, [])})
-    ch_areas  = cf2.multiselect("Main Area", options=avail_a,                                 default=avail_a,   key="ch_area") or avail_a
-    avail_s   = sorted({sub for area in ch_areas for sub in area_to_subareas.get(area, [])})
-    ch_subs   = cf3.multiselect("Subarea",   options=avail_s,                                 default=avail_s,   key="ch_sub")  or avail_s
 
-    _, ch_fv = _bot_apply_filters(df_conn, df_master, ch_mrus, ch_subs)
+    # MRU labels: "MRU-1 : Naipalapur"
+    mru_label_map = {}
+    for mru in all_mrus:
+        names = df_conn.loc[df_conn["MRU"] == mru, "MRU_NAME"].dropna().astype(str)
+        name  = names.iloc[0].strip() if not names.empty else ""
+        mru_label_map[mru] = f"{mru} : {name}" if name else mru
+    mru_labels   = [mru_label_map[m] for m in all_mrus]
+    label_to_mru = {v: k for k, v in mru_label_map.items()}
+
+    sel_mru_labels = st.multiselect(
+        "MRU", options=mru_labels, default=[], key="ch_mru",
+        placeholder="Select MRU(s)…"
+    )
+    ch_mrus = [label_to_mru[l] for l in sel_mru_labels] if sel_mru_labels else all_mrus
+
+    ch_fv = df_master[
+        (df_master["MRU"] != "Unassigned") &
+        (df_master["MRU"].isin(ch_mrus))
+    ].copy() if not df_master.empty else pd.DataFrame()
 
     if ch_fv.empty:
         _bot_bubble("⚠️ No charged connections found for the selected scope.")
@@ -563,10 +547,21 @@ def _render_ranking(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> None:
 
     _section_header("📍 Select MRUs")
     all_mrus, mru_to_areas, area_to_subareas, subarea_to_mru = _derive_geo_lists(df_conn)
-    rk_mrus = st.multiselect(
-        "MRU", options=all_mrus, default=all_mrus,
-        key="rk_mru", label_visibility="collapsed",
-    ) or all_mrus
+
+    # MRU labels: "MRU-1 : Naipalapur"
+    mru_label_map = {}
+    for mru in all_mrus:
+        names = df_conn.loc[df_conn["MRU"] == mru, "MRU_NAME"].dropna().astype(str)
+        name  = names.iloc[0].strip() if not names.empty else ""
+        mru_label_map[mru] = f"{mru} : {name}" if name else mru
+    mru_labels   = [mru_label_map[m] for m in all_mrus]
+    label_to_mru = {v: k for k, v in mru_label_map.items()}
+
+    sel_mru_labels = st.multiselect(
+        "MRU", options=mru_labels, default=[], key="rk_mru",
+        label_visibility="collapsed", placeholder="Select MRU(s)…"
+    )
+    rk_mrus = [label_to_mru[l] for l in sel_mru_labels] if sel_mru_labels else all_mrus
     rk_fc, rk_fv = _bot_apply_filters(df_conn, df_master, rk_mrus, [])
 
     _section_header("🔬 Analysis View")
