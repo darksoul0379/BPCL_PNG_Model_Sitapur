@@ -88,6 +88,32 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
         key="sb_sel_areas_new",
     )
 
+    # ── Charged date range filter (Overview) ──────────────────────────────────
+    charged_date_d0 = charged_date_d1 = None
+    if not df_master.empty and "Conversion Date" in df_master.columns:
+        _cm = df_master.copy()
+        _cm["Conversion Date"] = pd.to_datetime(_cm["Conversion Date"], errors="coerce")
+        _cmin = _cm["Conversion Date"].min()
+        _cmax = _cm["Conversion Date"].max()
+        if pd.notna(_cmin) and pd.notna(_cmax):
+            _cmin_date = _cmin.date()
+            _cmax_date = _cmax.date()
+            _stored_c = st.session_state.get("sb_charged_date_range")
+            if isinstance(_stored_c, (list, tuple)) and len(_stored_c) == 2:
+                if _stored_c[0] < _cmin_date or _stored_c[1] > _cmax_date or _stored_c[0] > _stored_c[1]:
+                    st.session_state.pop("sb_charged_date_range", None)
+            st.sidebar.markdown(_section_label("⚡ Charged Date Range"), unsafe_allow_html=True)
+            _cdr = st.sidebar.date_input(
+                "Charged Conversion Range",
+                value=(_cmin_date, _cmax_date),
+                min_value=_cmin_date,
+                max_value=_cmax_date,
+                key="sb_charged_date_range",
+                label_visibility="collapsed",
+            )
+            if isinstance(_cdr, (list, tuple)) and len(_cdr) == 2:
+                charged_date_d0, charged_date_d1 = _cdr[0], _cdr[1]
+
     st.sidebar.markdown("---")
     st.sidebar.markdown(_section_label("🎨 Dot Logic", color="#44445a"), unsafe_allow_html=True)
     grey_uncharged = st.sidebar.toggle("Grey Uncharged Areas", value=False, key="sb_grey_uncharged")
@@ -112,14 +138,22 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
     date_d0 = date_d1 = None
     df_master_f = apply_area_filter(df_master, set(selected_areas), set(selected_mrus))
     if not df_master_f.empty and "Conversion Date" in df_master_f.columns:
+        df_master_f["Conversion Date"] = pd.to_datetime(df_master_f["Conversion Date"], errors="coerce")
         _min_d = df_master_f["Conversion Date"].min()
         _max_d = df_master_f["Conversion Date"].max()
         if pd.notna(_min_d) and pd.notna(_max_d):
+            _min_date = _min_d.date()
+            _max_date = _max_d.date()
+            # Clear stale session state if stored range is outside the real data range
+            _stored = st.session_state.get("sb_date_range")
+            if isinstance(_stored, (list, tuple)) and len(_stored) == 2:
+                if _stored[0] < _min_date or _stored[1] > _max_date or _stored[0] > _stored[1]:
+                    st.session_state.pop("sb_date_range", None)
             _dr = st.sidebar.date_input(
                 "Date Range",
-                value=(_min_d.date(), _max_d.date()),
-                min_value=_min_d.date(),
-                max_value=_max_d.date(),
+                value=(_min_date, _max_date),
+                min_value=_min_date,
+                max_value=_max_date,
                 key="sb_date_range",
             )
             if isinstance(_dr, (list, tuple)) and len(_dr) == 2:
@@ -173,6 +207,8 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
         "map_style": map_style,
         "date_d0": date_d0,
         "date_d1": date_d1,
+        "charged_date_d0": charged_date_d0,
+        "charged_date_d1": charged_date_d1,
         "df_master_f": df_master_f,
         "map_mode": map_mode,
         "heatmap_tile": heatmap_tile,

@@ -560,7 +560,9 @@ def run_analysis(df_conn, df_master, show_deep_tabs=True, widget_prefix="analysi
                 "Priority": pri_val[0] if len(pri_val) else "",
             })
 
-        fc = pd.DataFrame(forecasts).sort_values("Adoption %", ascending=False)
+        _FC_COLS = ["Subarea","MRU","Total","Charged","Adoption %","Rate/Day","Days to 50%","ETA 50%","Priority"]
+        fc = pd.DataFrame(forecasts, columns=_FC_COLS) if forecasts else pd.DataFrame(columns=_FC_COLS)
+        fc = fc.sort_values("Adoption %", ascending=False) if not fc.empty else fc
         m2,m3 = st.columns(2)
         m2.metric("🚀 Hit 50% in <90d", f"{len(fc[pd.to_numeric(fc['Days to 50%'],errors='coerce').fillna(999)<=90])} areas")
         m3.metric("🔴 Below 20%",       f"{len(fc[fc['Adoption %']<20])} areas")

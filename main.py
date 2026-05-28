@@ -494,6 +494,8 @@ show_charged        = sb["show_charged"]
 map_style            = sb["map_style"]
 date_d0              = sb["date_d0"]
 date_d1              = sb["date_d1"]
+charged_date_d0      = sb["charged_date_d0"]
+charged_date_d1      = sb["charged_date_d1"]
 df_master_f          = sb["df_master_f"]
 _map_mode            = sb["map_mode"]
 _heatmap_tile        = sb["heatmap_tile"]
@@ -593,6 +595,15 @@ center_lon = pd.Series(_all_lons).median() if _all_lons else 80.690
 # Connections scatter with resolved visual state
 plot_df = df_conn_f.copy()
 charged_meter_set = set(df_master_f["Meter Number"].dropna().astype(str).str.strip()) if not df_master_f.empty else set()
+# Apply charged date range filter if set
+if charged_date_d0 and charged_date_d1 and not df_master_f.empty:
+    _cm = df_master_f.copy()
+    _cm["Conversion Date"] = pd.to_datetime(_cm["Conversion Date"], errors="coerce")
+    _cm = _cm[
+        (_cm["Conversion Date"].dt.date >= charged_date_d0) &
+        (_cm["Conversion Date"].dt.date <= charged_date_d1)
+    ]
+    charged_meter_set = set(_cm["Meter Number"].dropna().astype(str).str.strip())
 plot_df["dot_state"] = plot_df["MRU"].astype(str)
 if grey_uncharged:
     mask_unch = plot_df["AREA_STATUS"].astype(str).str.upper().eq("UNCHARGED")
@@ -626,7 +637,7 @@ fig = px.scatter_mapbox(
 )
 for tr in fig.data:
     if getattr(tr, "name", "") == "CHARGED":
-        tr.marker.size = 4.4
+        tr.marker.size = 8
         tr.marker.opacity = 0.98
     else:
         tr.marker.size = 4
