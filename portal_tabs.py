@@ -135,8 +135,10 @@ def render_converted_tab() -> None:
     conn_df, _conn_sha, conn_error = read_csv_github(
         CONNECTION_FILE, CONNECTION_FILE_COLUMNS
     )
+    # Conversion-Data.csv actual schema: "Meter No." and "Date" only
+    CONV_COLS = ["Meter No.", "Date"]
     master_df, master_sha, master_error = read_csv_github(
-        MASTER_FILE, MASTER_FILE_COLUMNS
+        MASTER_FILE, CONV_COLS
     )
     if conn_error:
         st.warning(f"connections.csv read issue: {conn_error}")
@@ -205,29 +207,7 @@ def render_converted_tab() -> None:
             "Meter No *",
             value=auto_data.get("METER NO", lookup_meter) if found else lookup_meter,
         )
-        ch_name = c2.text_input(
-            "Customer Name",
-            value=auto_data.get("NAME", "") if found else "",
-        )
-        c3, c4 = st.columns(2)
-        ch_phone = c3.text_input(
-            "Mobile No",
-            value=str(auto_data.get("MOB NO", "")) if found else "",
-        )
-        conversion_date = c4.date_input("Conversion Date", format="DD/MM/YYYY")
-
-        c5, c6 = st.columns(2)
-        # Lat / Lon are locked when auto-filled to prevent accidental edits
-        ch_lat = c5.text_input(
-            "Latitude",
-            value=str(auto_data.get("Latitude", "")) if found else "",
-            disabled=found,
-        )
-        ch_long = c6.text_input(
-            "Longitude",
-            value=str(auto_data.get("Longitude", "")) if found else "",
-            disabled=found,
-        )
+        conversion_date = c2.date_input("Conversion Date", format="DD/MM/YYYY")
         submit_charge = st.form_submit_button(
             "Save Converted Entry", use_container_width=True
         )
@@ -241,7 +221,7 @@ def render_converted_tab() -> None:
 
     # ── Duplicate check in conversions ───────────────────────────────────────────
     existing = (
-        normalize_meter(master_df["Meter Number"])
+        normalize_meter(master_df["Meter No."])
         if not master_df.empty
         else pd.Series(dtype=str)
     )
@@ -249,17 +229,10 @@ def render_converted_tab() -> None:
         st.warning(f"Meter `{ch_meter}` already exists in conversions.csv.")
         return
 
-    # Use auto-filled lat/lon if available, else fall back to manual entry
-    lat_val = str(auto_data.get("Latitude",  "") if found else ch_lat).strip()
-    lon_val = str(auto_data.get("Longitude", "") if found else ch_long).strip()
-
+    # Write only the 2 columns that match the actual CSV schema
     new_row = {
-        "Meter Number":    ch_meter.strip(),
-        "Customer Name":   ch_name.strip(),
-        "Mobile NUMBER":   ch_phone.strip(),
-        "Latitude":        lat_val,
-        "Longitude":       lon_val,
-        "Conversion Date": conversion_date.strftime("%d/%m/%Y"),
+        "Meter No.": ch_meter.strip(),
+        "Date":      conversion_date.strftime("%d/%m/%Y"),
     }
     updated_df = pd.concat(
         [master_df, pd.DataFrame([new_row])], ignore_index=True

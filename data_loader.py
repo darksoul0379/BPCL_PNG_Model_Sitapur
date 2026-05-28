@@ -191,16 +191,23 @@ def load_master_data() -> pd.DataFrame:
     conv = pd.read_csv(ROOT_CONVERSIONS_FILE)
     conv.columns = [c.strip().replace("\ufeff", "") for c in conv.columns]
 
-    # Map real column names → canonical names
-    conv = conv.rename(columns={
-        "Meter No.":       "Meter Number",
-        "Meter No":        "Meter Number",
-        "Date":            "Conversion Date",
-    })
-    # Fallback: first col is meter number if still missing
-    if "Meter Number" not in conv.columns:
-        conv = conv.rename(columns={conv.columns[0]: "Meter Number"})
-
+    # ── Consolidate columns regardless of corruption state ────────────────────────
+    # The GitHub file may be corrupted (8 cols) from a previous bad write.
+    # Row-by-row, pick meter no and date from whichever column has the value.
+    _meter_cols = ["Meter No.", "Meter Number", "Meter No"]
+    _date_cols  = ["Date", "Conversion Date"]
+    rows = []
+    for _, row in conv.iterrows():
+        m, d = "", ""
+        for c in _meter_cols:
+            if c in conv.columns and str(row[c]).strip() not in ("", "nan"):
+                m = str(row[c]).strip(); break
+        for c in _date_cols:
+            if c in conv.columns and str(row[c]).strip() not in ("", "nan"):
+                d = str(row[c]).strip(); break
+        if m:
+            rows.append({"Meter Number": m, "Conversion Date": d})
+    conv = pd.DataFrame(rows, columns=["Meter Number", "Conversion Date"])
     conv["Meter Number"] = _clean(conv["Meter Number"])
 
     # Build lookup from connection data
