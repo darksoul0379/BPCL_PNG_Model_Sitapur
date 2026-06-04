@@ -96,6 +96,8 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
     st.sidebar.markdown(_section_label("🎨 Dot Logic", color="#44445a"), unsafe_allow_html=True)
     grey_uncharged = st.sidebar.toggle("Grey Uncharged Areas", value=False, key="sb_grey_uncharged")
     show_charged = st.sidebar.toggle("Show Charged", value=False, key="sb_show_charged")
+    show_gc = st.sidebar.toggle("🟡 Show GC Done", value=False, key="sb_show_gc")
+    show_notice = st.sidebar.toggle("🔴 Show Not Interested", value=False, key="sb_show_notice")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(_section_label("🗺️ Map Style", color="#44445a"), unsafe_allow_html=True)
@@ -182,6 +184,8 @@ def render_sidebar(df_conn: pd.DataFrame, df_master: pd.DataFrame) -> dict:
         "allowed_areas": set(selected_areas),
         "grey_uncharged": grey_uncharged,
         "show_charged": show_charged,
+        "show_gc": show_gc,
+        "show_notice": show_notice,
         "map_style": map_style,
         "date_d0": date_d0,
         "date_d1": date_d1,

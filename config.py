@@ -80,11 +80,14 @@ MRU_COLORS: dict[str, str] = {
     "MRU-4": "#8A5CF6",
     "MRU-5": "#B04FFF",
     "MRU-6": "#FF69B4",
-    "MRU-7": "#FFD700",
+    "MRU-7": "#E040FB",   # changed from #FFD700 (yellow) — now magenta/violet
     "MRU-8": "#00E5CC",
     "MRU-9": "#FF6B35",
     "Unassigned": "#9AA0A6",
 }
+
+GC_COLOR: str = "#FFD700"   # yellow — reserved exclusively for GC Done dots
+NOTICE_COLOR: str = "#FF2D2D"
 
 CHARGED_COLOR: str = CHARGED_COLOR_PREMIUM
 UNCHARGED_GREY: str = "#9AA0A6"

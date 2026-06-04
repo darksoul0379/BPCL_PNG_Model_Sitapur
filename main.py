@@ -56,7 +56,7 @@ from premium_theme import (
 
 # ── App sub-modules ───────────────────────────────────────────────────────────────
 from auth        import check_password, logout_user, APP_USERS
-from config      import GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, MRU_COLORS, CHARGED_COLOR
+from config      import GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, MRU_COLORS, CHARGED_COLOR, GC_COLOR, NOTICE_COLOR
 from data_loader import load_connection_data, load_master_data
 from sidebar_ui  import render_sidebar, apply_area_filter
 
@@ -491,6 +491,8 @@ allowed_mrus         = sb["allowed_mrus"]
 allowed_areas        = sb["allowed_areas"]
 grey_uncharged      = sb["grey_uncharged"]
 show_charged        = sb["show_charged"]
+show_gc             = sb.get("show_gc", False)
+show_notice         = sb.get("show_notice", False)
 map_style            = sb["map_style"]
 date_d0              = sb["date_d0"]
 date_d1              = sb["date_d1"]
@@ -568,13 +570,47 @@ _uncharged     = len(df_conn_f[df_conn_f["AREA_STATUS"].astype(str).str.upper() 
 _not_converted = _total - _converted
 _conversion_pct = f"{_converted / _total * 100:.1f}%" if _total > 0 else "—"
 
+# Load GC Done meter set from gc.csv for KPI count
+import os as _os
+_gc_csv_path = _os.path.join(_os.path.dirname(__file__), "gc.csv")
+try:
+    _gc_df_raw = pd.read_csv(_gc_csv_path, header=None, names=["METER NO"])
+    gc_meter_set = set(_gc_df_raw["METER NO"].dropna().astype(str).str.strip())
+except Exception:
+    gc_meter_set = set()
+try:
+    _notice_df_raw = pd.read_csv(_os.path.join(_os.path.dirname(__file__), "notice.csv"))
+    _notice_col = "METER NO." if "METER NO." in _notice_df_raw.columns else _notice_df_raw.columns[0]
+    _notice_status_col = "NOTICE SENT" if "NOTICE SENT" in _notice_df_raw.columns else None
+    _notice_df_raw[_notice_col] = _notice_df_raw[_notice_col].dropna().astype(str).str.strip()
+    notice_meter_set = set(_notice_df_raw[_notice_col].dropna().astype(str).str.strip())
+    if _notice_status_col:
+        notice_status_map = (
+            _notice_df_raw[[_notice_col, _notice_status_col]]
+            .dropna(subset=[_notice_col])
+            .assign(**{
+                _notice_col: lambda d: d[_notice_col].astype(str).str.strip(),
+                _notice_status_col: lambda d: d[_notice_status_col].astype(str).str.strip(),
+            })
+            .drop_duplicates(subset=[_notice_col], keep="last")
+            .set_index(_notice_col)[_notice_status_col]
+            .to_dict()
+        )
+    else:
+        notice_status_map = {}
+except Exception:
+    notice_meter_set = set()
+    notice_status_map = {}
+_gc_count = int(df_conn_f["METER NO"].astype(str).str.strip().isin(gc_meter_set).sum())
+
 with main_tab:
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("🔌 Total",          f"{_total:,}")
     c2.metric("⚡ Converted",      f"{_converted:,}")
     c3.metric("📈 Conversion %",   _conversion_pct)
     c4.metric("⭕ Not Converted",  f"{_not_converted:,}")
     c5.metric("📍 Uncharged",      f"{_uncharged:,}")
+    c6.metric("🟡 GC Done",        f"{_gc_count:,}")
 
 # Build the Overview map
 _GOOGLE_TILES = {
@@ -608,24 +644,57 @@ plot_df["dot_state"] = plot_df["MRU"].astype(str)
 if grey_uncharged:
     mask_unch = plot_df["AREA_STATUS"].astype(str).str.upper().eq("UNCHARGED")
     plot_df.loc[mask_unch, "dot_state"] = "UNCHARGED"
+if show_gc:
+    mask_gc = plot_df["METER NO"].astype(str).str.strip().isin(gc_meter_set)
+    plot_df.loc[mask_gc, "dot_state"] = "GC"
 if show_charged:
     mask_chg = plot_df["METER NO"].astype(str).str.strip().isin(charged_meter_set)
     plot_df.loc[mask_chg, "dot_state"] = "CHARGED"
+if show_notice:
+    mask_notice = (
+        plot_df["METER NO"].astype(str).str.strip().isin(notice_meter_set)
+        & ~plot_df["METER NO"].astype(str).str.strip().isin(charged_meter_set)
+    )
+    plot_df.loc[mask_notice, "dot_state"] = "NOTICE"
+
+plot_df["GC_STATUS"] = plot_df["METER NO"].astype(str).str.strip().isin(gc_meter_set).map(lambda x: "Done" if x else "Pending")
+plot_df["NOTICE_STATUS"] = plot_df["METER NO"].astype(str).str.strip().map(
+    lambda m: (
+        "Converted Household"
+        if m in charged_meter_set
+        else f"Not Interested / {notice_status_map.get(m, 'Unknown')}"
+        if m in notice_meter_set
+        else "Interested / Unknown"
+    )
+)
+plot_df["CHARGED_STATUS"] = plot_df["AREA_STATUS"].astype(str).str.upper().map(lambda x: "Charged" if x != "UNCHARGED" else "Not Charged")
+plot_df["CONVERTED_STATUS"] = plot_df["METER NO"].astype(str).str.strip().isin(charged_meter_set).map(lambda x: "Converted" if x else "Not Converted")
+
 
 color_map = dict(MRU_COLORS)
 color_map["UNCHARGED"] = "#9AA0A6"
 color_map["CHARGED"] = CHARGED_COLOR
+color_map["GC"] = GC_COLOR
+color_map["NOTICE"] = NOTICE_COLOR
 
 _base_style = "white-bg" if map_style in _GOOGLE_TILES else map_style
 fig = px.scatter_mapbox(
     plot_df,
     lat="Latitude", lon="Longitude",
     hover_name="NAME",
-    hover_data={
-        "METER NO": True, "MOB NO": True,
-        "MRU": True, "Main_Area": True,
-        "AREA_STATUS": True,
-        "Latitude": ":.6f", "Longitude": ":.6f",
+        hover_data={
+        "METER NO": True,
+        "NAME": True,
+        "MOB NO": True,
+        "Main_Area": True,
+        "MRU": True,
+        "GC_STATUS": True,
+        "NOTICE_STATUS": True,
+        "CHARGED_STATUS": True,
+        "CONVERTED_STATUS": True,
+        "dot_state": False,
+        "Latitude": ":.6f",
+        "Longitude": ":.6f",
     },
     color="dot_state",
     color_discrete_map=color_map,
@@ -637,8 +706,14 @@ fig = px.scatter_mapbox(
 )
 for tr in fig.data:
     if getattr(tr, "name", "") == "CHARGED":
-        tr.marker.size = 8
-        tr.marker.opacity = 0.98
+        tr.marker.size = 6
+        tr.marker.opacity = 0.91
+    elif getattr(tr, "name", "") == "GC":
+        tr.marker.size = 5
+        tr.marker.opacity = 0.9
+    elif getattr(tr, "name", "") == "NOTICE":
+        tr.marker.size = 5
+        tr.marker.opacity = 0.95
     else:
         tr.marker.size = 4
         tr.marker.opacity = 0.85
